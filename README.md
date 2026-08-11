@@ -1,10 +1,19 @@
-# FaceMatcher
+# FaceMatcher — AI Face Recognition System
 
-AI-powered face recognition web app with four modules: video scanning, live webcam matching, face database, and emotion detection.
+Real-time face recognition web app with four modules: video scanning, live webcam matching, a searchable face database, and emotion detection.
 
-**Stack:** FastAPI · face_recognition · DeepFace · React · Vite · TypeScript · Tailwind CSS · Framer Motion · SQLite
+**Stack:** FastAPI · face_recognition · DeepFace · OpenCV · React (Vite + TS) · Tailwind CSS · Framer Motion · SQLite
 
 ---
+
+## Features
+
+| Module | Route | Description |
+|--------|-------|-------------|
+| Video Match | `/video` | Upload reference face + video → scan every N frames → matched frame thumbnails with timestamps and confidence rings |
+| Live Camera | `/live` | Webcam stream → WebSocket → real-time face bbox overlay with MATCH DETECTED alert |
+| Face Database | `/database` | Register named faces in SQLite → identify faces in any photo → annotated results |
+| Emotion Detect | `/emotion` | Upload or webcam snapshot → DeepFace → dominant emotion + animated 7-emotion bar chart |
 
 ## Quick Start
 
@@ -33,19 +42,6 @@ npm run dev
 
 Open `http://localhost:5173`.
 
----
-
-## Features
-
-| Module | Route | Description |
-|--------|-------|-------------|
-| Video Match | `/video` | Upload reference face + video → scan every N frames → matched frame thumbnails with timestamps and confidence rings |
-| Live Camera | `/live` | Webcam stream → WebSocket → real-time face bbox overlay with MATCH DETECTED alert |
-| Face Database | `/database` | Register named faces in SQLite → identify faces in any photo → annotated results |
-| Emotion Detect | `/emotion` | Upload or webcam snapshot → DeepFace → dominant emotion + animated 7-emotion bar chart |
-
----
-
 ## Architecture
 
 ```
@@ -59,8 +55,6 @@ browser ──REST/WS──► FastAPI (port 8000)
 - Face encodings stored as `float64` BLOBs in SQLite, cached in-memory on startup
 - Confidence = `1 - face_recognition_distance` (range 0–1, higher = better match)
 - WebSocket frames capped at 6 fps client-side to avoid transport overload
-
----
 
 ## Deploy
 
@@ -88,16 +82,12 @@ npm run build
 
 `vercel.json` already handles SPA routing rewrites.
 
----
-
 ## Environment Variables
 
 | File | Variable | Value |
 |------|----------|-------|
 | `frontend/.env.development` | `VITE_API_URL` | `http://localhost:8000` |
 | `frontend/.env.production` | `VITE_API_URL` | your Render URL |
-
----
 
 ## Credits
 
