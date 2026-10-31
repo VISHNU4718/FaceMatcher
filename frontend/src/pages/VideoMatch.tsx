@@ -9,24 +9,17 @@ import Chip from '../components/Chip';
 import EmptyState from '../components/EmptyState';
 import { recordActivity } from '../lib/activity';
 import { useToast } from '../App';
-import { api, getStaticUrl } from '../lib/api';
+import { errorMessage, matchVideo } from '../lib/api';
+import { useEngine } from '../lib/useEngine';
 import { VideoMatchResponse, VideoMatchResult } from '../types';
 import { formatTime } from '../lib/utils';
+import { ASSUMED_FPS, MAX_VIDEO_SAMPLES } from '../lib/matching';
 
 const PAGE = {
   initial: { opacity: 0, y: 16 },
   animate: { opacity: 1, y: 0, transition: { duration: 0.35, ease: 'easeOut' } },
   exit: { opacity: 0, y: -8, transition: { duration: 0.2 } },
 };
-
-const SCAN_MSGS = [
-  'Extracting reference face encoding…',
-  'Scanning video frames…',
-  'Running face detection…',
-  'Computing match distances…',
-  'Aggregating results…',
-  'Almost done…',
-];
 
 export default function VideoMatch() {
   const { toast } = useToast();
@@ -36,13 +29,13 @@ export default function VideoMatch() {
   const [frameSkip, setFrameSkip] = useState(5);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [msgIdx, setMsgIdx] = useState(0);
   const [result, setResult] = useState<VideoMatchResponse | null>(null);
   const [minConf, setMinConf] = useState(0);
   const [sortBy, setSortBy] = useState<'time' | 'conf'>('time');
   const [view, setView] = useState<'grid' | 'timeline'>('grid');
-  const progressRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const msgRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const [scanLabel, setScanLabel] = useState('Loading models…');
+  useEngine();
 
   const filteredMatches = (result?.matches ?? [])
     .filter((m) => m.confidence >= minConf)
@@ -50,44 +43,27 @@ export default function VideoMatch() {
       sortBy === 'time' ? a.timestamp_seconds - b.timestamp_seconds : b.confidence - a.confidence,
     );
 
-  function startProgress() {
-    setProgress(0);
-    setMsgIdx(0);
-    progressRef.current = setInterval(() => {
-      setProgress((p) => (p < 90 ? p + Math.random() * 2.5 : p));
-    }, 300);
-    msgRef.current = setInterval(() => {
-      setMsgIdx((i) => (i + 1) % SCAN_MSGS.length);
-    }, 2200);
-  }
-
-  function stopProgress() {
-    if (progressRef.current) clearInterval(progressRef.current);
-    if (msgRef.current) clearInterval(msgRef.current);
-    setProgress(100);
-  }
-
-  useEffect(() => () => {
-    if (progressRef.current) clearInterval(progressRef.current);
-    if (msgRef.current) clearInterval(msgRef.current);
-  }, []);
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   async function handleSubmit() {
     if (!refImg || !video) { toast('Upload both reference image and video.', 'warning'); return; }
     setLoading(true);
     setResult(null);
-    startProgress();
+    setProgress(0);
+    setScanLabel('Loading models and reading the reference face…');
+    abortRef.current = new AbortController();
     try {
-      const fd = new FormData();
-      fd.append('reference_image', refImg);
-      fd.append('video', video);
-      fd.append('threshold', String(threshold));
-      fd.append('frame_skip', String(frameSkip));
-      const { data } = await api.post<VideoMatchResponse>('/api/match/video', fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 300_000,
+      const data = await matchVideo({
+        reference: refImg,
+        video,
+        threshold,
+        frameSkip,
+        signal: abortRef.current.signal,
+        onProgress: (done, total) => {
+          setProgress((done / total) * 100);
+          setScanLabel(`Analysing frame ${done} of ${total}…`);
+        },
       });
-      stopProgress();
       setResult(data);
       recordActivity({
         kind: 'video',
@@ -101,10 +77,8 @@ export default function VideoMatch() {
         toast(`Found ${data.matches.length} match${data.matches.length > 1 ? 'es' : ''}!`, 'success');
       }
     } catch (err: unknown) {
-      stopProgress();
       setProgress(0);
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Processing failed.';
-      toast(msg, 'error');
+      toast(errorMessage(err, 'Processing failed.'), 'error');
     } finally {
       setLoading(false);
     }
@@ -112,7 +86,11 @@ export default function VideoMatch() {
 
   function exportJSON() {
     if (!result) return;
-    const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(
+      { ...result, matches: result.matches.map(({ frame_url: _frame, ...m }) => m) },
+      null,
+      2,
+    )], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = 'facematcher-results.json';
@@ -171,7 +149,7 @@ export default function VideoMatch() {
               </button>
             ))}
           </div>
-          <p className="text-xs text-slate-600 mt-1 font-mono">process 1 frame every N</p>
+          <p className="text-xs text-slate-600 mt-1 font-mono">one frame every N, assuming {ASSUMED_FPS} fps (capped at {MAX_VIDEO_SAMPLES} frames per video)</p>
         </div>
       </div>
 
@@ -189,8 +167,13 @@ export default function VideoMatch() {
       {loading && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="glass p-5 flex flex-col gap-3">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-mono text-slate-400">{SCAN_MSGS[msgIdx]}</span>
-            <span className="text-xs font-mono text-blue-400">{Math.floor(progress)}%</span>
+            <span className="text-xs font-mono text-slate-400">{scanLabel}</span>
+            <span className="flex items-center gap-3">
+              <span className="text-xs font-mono text-blue-400">{Math.floor(progress)}%</span>
+              <button onClick={() => abortRef.current?.abort()} className="text-xs font-mono text-slate-400 hover:text-white">
+                Cancel
+              </button>
+            </span>
           </div>
           <div className="progress-bar">
             <motion.div
@@ -221,7 +204,7 @@ export default function VideoMatch() {
             <ResultStat label="Matches" value={result.matches.length} highlight={result.matches.length > 0} accent="#10B981" />
             <ResultStat label="Frames Scanned" value={result.total_frames_scanned} accent="#3B82F6" />
             <ResultStat label="Duration" value={formatTime(result.video_duration_seconds)} accent="#8B5CF6" />
-            <ResultStat label="Source FPS" value={result.fps.toFixed(1)} accent="#F59E0B" />
+            <ResultStat label="Assumed FPS" value={result.fps.toFixed(0)} accent="#F59E0B" />
           </div>
 
           {result.matches.length > 0 ? (
@@ -335,7 +318,7 @@ export default function VideoMatch() {
 function MatchCard({ match, index }: { match: VideoMatchResult; index: number }) {
   return (
     <motion.a
-      href={getStaticUrl(match.frame_url)}
+      href={match.frame_url}
       target="_blank"
       rel="noreferrer"
       initial={{ opacity: 0, scale: 0.96 }}
@@ -345,7 +328,7 @@ function MatchCard({ match, index }: { match: VideoMatchResult; index: number })
     >
       <div className="relative">
         <img
-          src={getStaticUrl(match.frame_url)}
+          src={match.frame_url}
           alt={`Match at ${formatTime(match.timestamp_seconds)}`}
           className="w-full aspect-video object-cover rounded-lg bg-navy-800 ring-1 ring-white/5"
         />
@@ -412,7 +395,7 @@ function TimelineView({ matches, duration }: { matches: VideoMatchResult[]; dura
           return (
             <a
               key={i}
-              href={getStaticUrl(m.frame_url)}
+              href={m.frame_url}
               target="_blank"
               rel="noreferrer"
               className="absolute top-1/2 -translate-y-1/2 group"
@@ -435,7 +418,7 @@ function TimelineView({ matches, duration }: { matches: VideoMatchResult[]; dura
           {matches.slice(0, 12).map((m, i) => (
             <a
               key={i}
-              href={getStaticUrl(m.frame_url)}
+              href={m.frame_url}
               target="_blank"
               rel="noreferrer"
               className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-white/10 hover:border-white/25 text-[10px] font-mono text-slate-300"

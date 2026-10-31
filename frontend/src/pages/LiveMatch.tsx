@@ -2,7 +2,8 @@ import { useRef, useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Camera, CameraOff, Upload, Zap, Maximize2, Wifi, Gauge, Users, Target } from 'lucide-react';
 import { useToast } from '../App';
-import { getWsUrl } from '../lib/api';
+import { errorMessage, LiveMatcher } from '../lib/api';
+import { useEngine } from '../lib/useEngine';
 import { LiveMatchResponse, LiveFaceResult } from '../types';
 import { confidenceColor } from '../lib/utils';
 import clsx from 'clsx';
@@ -18,10 +19,12 @@ const PAGE = {
 
 export default function LiveMatch() {
   const { toast } = useToast();
+  useEngine();
   const [refImg, setRefImg] = useState<File | null>(null);
   const [refPreview, setRefPreview] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [ready, setReady] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [faces, setFaces] = useState<LiveFaceResult[]>([]);
   const [fps, setFps] = useState(0);
   const [latency, setLatency] = useState(0);
@@ -30,16 +33,13 @@ export default function LiveMatch() {
   const [matchDetected, setMatchDetected] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const matcherRef = useRef<LiveMatcher | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number>(0);
-  const frameIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const loopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fpsCounterRef = useRef(0);
   const fpsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const facesRef = useRef<LiveFaceResult[]>([]);
-  const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const retryCountRef = useRef(0);
-  const readyRef = useRef(false);
   const runningRef = useRef(false);
   const matchLoggedRef = useRef(false);
   const sessionMatchesRef = useRef(0);
@@ -47,7 +47,6 @@ export default function LiveMatch() {
 
   facesRef.current = faces;
 
-  useEffect(() => { readyRef.current = ready; }, [ready]);
   useEffect(() => { runningRef.current = running; }, [running]);
 
   useEffect(() => {
@@ -103,72 +102,66 @@ export default function LiveMatch() {
     rafRef.current = requestAnimationFrame(drawLoop);
   }, []);
 
-  function connectWs() {
-    if (!refImg) return;
-    const ws = new WebSocket(getWsUrl('/api/match/live'));
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      retryCountRef.current = 0;
-      const reader = new FileReader();
-      reader.onload = () => {
-        const b64 = (reader.result as string).split(',')[1];
-        ws.send(JSON.stringify({ type: 'init', reference_image: b64 }));
-      };
-      reader.readAsDataURL(refImg);
-    };
-
-    ws.onmessage = (ev) => {
-      const data = JSON.parse(ev.data) as LiveMatchResponse & { status?: string; error?: string };
-      if (data.status === 'ready') { setReady(true); return; }
-      if (data.error) { toast(data.error, 'error'); return; }
-      const newFaces = data.matches ?? [];
-      setFaces(newFaces);
-      setFaceCount(data.face_count ?? 0);
-      setLatency(data.processing_ms ?? 0);
-      fpsCounterRef.current++;
-      const best = newFaces.length > 0 ? Math.max(...newFaces.map((f) => f.confidence)) : 0;
-      setBestConfidence(best);
-      const matched = newFaces.some((f) => f.is_match);
-      setMatchDetected(matched);
-      if (matched) {
-        sessionMatchesRef.current++;
-        if (!matchLoggedRef.current) {
-          matchLoggedRef.current = true;
-          recordActivity({
-            kind: 'live',
-            title: 'Live match detected',
-            detail: `Confidence ${(best * 100).toFixed(0)}% · ${data.face_count} face(s) in frame`,
-            meta: { matches: 1, confidence: Math.round(best * 100) },
-          });
-        }
+  function handleResult(data: LiveMatchResponse) {
+    const newFaces = data.matches ?? [];
+    setFaces(newFaces);
+    setFaceCount(data.face_count ?? 0);
+    setLatency(data.processing_ms ?? 0);
+    fpsCounterRef.current++;
+    const best = newFaces.length > 0 ? Math.max(...newFaces.map((f) => f.confidence)) : 0;
+    setBestConfidence(best);
+    const matched = newFaces.some((f) => f.is_match);
+    setMatchDetected(matched);
+    if (matched) {
+      sessionMatchesRef.current++;
+      if (!matchLoggedRef.current) {
+        matchLoggedRef.current = true;
+        recordActivity({
+          kind: 'live',
+          title: 'Live match detected',
+          detail: `Confidence ${(best * 100).toFixed(0)}% · ${data.face_count} face(s) in frame`,
+          meta: { matches: 1, confidence: Math.round(best * 100) },
+        });
       }
-    };
+    }
+  }
 
-    ws.onclose = () => {
-      if (!runningRef.current) return;
-      const delay = Math.min(500 * 2 ** retryCountRef.current, 8000);
-      retryCountRef.current++;
-      reconnectRef.current = setTimeout(connectWs, delay);
-    };
-
-    ws.onerror = () => ws.close();
+  async function recognitionLoop() {
+    const matcher = matcherRef.current;
+    const video = videoRef.current;
+    if (!runningRef.current || !matcher || !video) return;
+    if (video.readyState >= 2) {
+      try {
+        handleResult(await matcher.process(video));
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    if (runningRef.current) loopRef.current = setTimeout(recognitionLoop, 40);
   }
 
   async function start() {
     if (!refImg) { toast('Upload a reference face image first.', 'warning'); return; }
+    setStarting(true);
+    try {
+      matcherRef.current = await LiveMatcher.create(refImg);
+    } catch (err) {
+      setStarting(false);
+      toast(errorMessage(err, 'Could not analyse the reference image.'), 'error');
+      return;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 } } });
       streamRef.current = stream;
       const video = videoRef.current!;
       video.srcObject = stream;
       await video.play();
+      runningRef.current = true;
       setRunning(true);
+      setReady(true);
       matchLoggedRef.current = false;
       sessionMatchesRef.current = 0;
       sessionStartRef.current = Date.now();
-
-      connectWs();
 
       rafRef.current = requestAnimationFrame(drawLoop);
 
@@ -177,37 +170,26 @@ export default function LiveMatch() {
         fpsCounterRef.current = 0;
       }, 1000);
 
-      // Send frames at ~6fps
-      frameIntervalRef.current = setInterval(() => {
-        const ws = wsRef.current;
-        if (!ws || ws.readyState !== WebSocket.OPEN || !readyRef.current) return;
-        const tempCanvas = document.createElement('canvas');
-        const v = videoRef.current!;
-        tempCanvas.width = v.videoWidth;
-        tempCanvas.height = v.videoHeight;
-        const ctx = tempCanvas.getContext('2d')!;
-        ctx.drawImage(v, 0, 0);
-        const b64 = tempCanvas.toDataURL('image/jpeg', 0.7).split(',')[1];
-        ws.send(JSON.stringify({ type: 'frame', data: b64 }));
-      }, 160);
+      loopRef.current = setTimeout(recognitionLoop, 0);
     } catch (err) {
       const msg = err instanceof Error ? `${err.name}: ${err.message}` : 'Camera unavailable.';
       console.error('getUserMedia error:', err);
       toast(msg, 'error');
+    } finally {
+      setStarting(false);
     }
   }
 
   function stop() {
+    runningRef.current = false;
     setRunning(false);
     setReady(false);
     setFaces([]);
     setMatchDetected(false);
     setBestConfidence(0);
-    if (frameIntervalRef.current) clearInterval(frameIntervalRef.current);
+    if (loopRef.current) clearTimeout(loopRef.current);
     if (fpsTimerRef.current) clearInterval(fpsTimerRef.current);
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    if (reconnectRef.current) clearTimeout(reconnectRef.current);
-    wsRef.current?.close();
     streamRef.current?.getTracks().forEach((t) => t.stop());
     const ctx = canvasRef.current?.getContext('2d');
     if (ctx && canvasRef.current) ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
@@ -222,7 +204,7 @@ export default function LiveMatch() {
         eyebrow="MODULE · 02"
         title="Live Camera"
         accent="#8B5CF6, #D946EF"
-        subtitle="Real-time face matching via webcam WebSocket stream."
+        subtitle="Real-time face matching on your webcam. Frames are processed in your browser and never leave it."
       />
 
       {/* Telemetry strip */}
@@ -271,7 +253,7 @@ export default function LiveMatch() {
             <span className="text-[10px] font-mono text-slate-500 uppercase tracking-[0.2em]">Session</span>
             <div className="grid grid-cols-2 gap-2 mt-3">
               <SessionStat label="State" value={running ? (ready ? 'Streaming' : 'Init…') : 'Idle'} dot={running ? (ready ? 'bg-emerald-400' : 'bg-amber-400') : 'bg-slate-500'} />
-              <SessionStat label="Pipeline" value="WebSocket" dot="bg-blue-400" />
+              <SessionStat label="Pipeline" value="In browser" dot="bg-blue-400" />
               <SessionStat label="Frame rate" value={`${fps}/s`} />
               <SessionStat label="Latency" value={`${latency}ms`} />
             </div>
@@ -279,7 +261,7 @@ export default function LiveMatch() {
 
           <button
             onClick={running ? stop : start}
-            disabled={!refImg}
+            disabled={!refImg || starting}
             className={clsx(
               'flex items-center justify-center gap-2 h-11 rounded-xl font-syne font-semibold text-sm transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed',
               running
@@ -295,13 +277,13 @@ export default function LiveMatch() {
             ) : (
               <>
                 <Camera size={16} />
-                Begin Live Feed
+                {starting ? 'Loading models…' : 'Begin Live Feed'}
               </>
             )}
           </button>
 
           <p className="text-[10px] font-mono text-slate-600 text-center px-2 leading-relaxed">
-            Reference image is encoded once at session start. Frames stream at ~6 fps over a single WebSocket.
+            Reference image is encoded once at session start. Each frame is analysed locally; the rate depends on your device.
           </p>
         </div>
 

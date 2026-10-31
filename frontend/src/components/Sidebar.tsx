@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useEffect, useState } from 'react';
-import { checkHealth } from '../lib/api';
+import { useEngine } from '../lib/useEngine';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface NavItem {
@@ -27,7 +27,7 @@ interface NavItem {
 const PRIMARY: NavItem[] = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard', end: true },
   { to: '/video', icon: Film, label: 'Video Match' },
-  { to: '/live', icon: Camera, label: 'Live Camera', badge: 'WS' },
+  { to: '/live', icon: Camera, label: 'Live Camera' },
   { to: '/database', icon: Database, label: 'Face DB' },
   { to: '/emotion', icon: Smile, label: 'Emotion' },
 ];
@@ -41,20 +41,8 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ onOpenPalette, collapsed, setCollapsed }: SidebarProps) {
-  const [healthy, setHealthy] = useState<boolean | null>(null);
-  const [latencyMs, setLatencyMs] = useState<number | null>(null);
-
-  useEffect(() => {
-    const poll = async () => {
-      const t = performance.now();
-      const ok = await checkHealth();
-      setHealthy(ok);
-      setLatencyMs(ok ? Math.round(performance.now() - t) : null);
-    };
-    poll();
-    const id = setInterval(poll, 5000);
-    return () => clearInterval(id);
-  }, []);
+  const engine = useEngine();
+  const healthy = engine.status === 'ready' ? true : engine.status === 'error' ? false : null;
 
   const width = collapsed ? 72 : 240;
 
@@ -179,8 +167,8 @@ export default function Sidebar({ onOpenPalette, collapsed, setCollapsed }: Side
             System
           </p>
         )}
-        <SystemRow icon={Activity} label="Models" value="2 active" collapsed={collapsed} />
-        <SystemRow icon={Settings} label="Local" value="CPU" collapsed={collapsed} />
+        <SystemRow icon={Activity} label="Models" value="face-api.js" collapsed={collapsed} />
+        <SystemRow icon={Settings} label="Runs" value="In browser" collapsed={collapsed} />
       </nav>
 
       {/* Health */}
@@ -206,10 +194,10 @@ export default function Sidebar({ onOpenPalette, collapsed, setCollapsed }: Side
             {!collapsed && (
               <>
                 <span className="text-[11px] font-mono text-slate-300 flex-1">
-                  {healthy === null ? 'Connecting' : healthy ? 'API online' : 'API offline'}
+                  {healthy === null ? 'Loading models' : healthy ? 'Models ready' : 'Models failed'}
                 </span>
-                {latencyMs !== null && (
-                  <span className="text-[10px] font-mono text-slate-500">{latencyMs}ms</span>
+                {engine.backend && (
+                  <span className="text-[10px] font-mono text-slate-500">{engine.backend}</span>
                 )}
               </>
             )}

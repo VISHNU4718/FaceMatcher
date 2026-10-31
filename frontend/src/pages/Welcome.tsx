@@ -24,7 +24,8 @@ import StatCard from '../components/StatCard';
 import Sparkline from '../components/Sparkline';
 import Chip from '../components/Chip';
 import EmptyState from '../components/EmptyState';
-import { api, checkHealth } from '../lib/api';
+import { listFaces } from '../lib/api';
+import { useEngine } from '../lib/useEngine';
 import { Face } from '../types';
 import {
   ActivityEvent,
@@ -62,8 +63,8 @@ const KIND_ACCENT = {
 
 export default function Welcome() {
   const [faces, setFaces] = useState<Face[]>([]);
-  const [healthy, setHealthy] = useState<boolean | null>(null);
-  const [latency, setLatency] = useState<number | null>(null);
+  const engine = useEngine();
+  const healthy = engine.status === 'ready' ? true : engine.status === 'error' ? false : null;
   const [activity, setActivity] = useState<ActivityEvent[]>(() => getActivity());
   const [tick, setTick] = useState(0);
 
@@ -76,28 +77,13 @@ export default function Welcome() {
 
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
-      try {
-        const { data } = await api.get<{ faces: Face[] }>('/api/faces/list');
-        if (!cancelled) setFaces(data.faces ?? []);
-      } catch {
-        /* offline */
-      }
-    };
-    const ping = async () => {
-      const t = performance.now();
-      const ok = await checkHealth();
-      if (!cancelled) {
-        setHealthy(ok);
-        setLatency(ok ? Math.round(performance.now() - t) : null);
-      }
-    };
-    load();
-    ping();
-    const id = setInterval(ping, 8_000);
+    listFaces()
+      .then((all) => {
+        if (!cancelled) setFaces(all);
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
-      clearInterval(id);
     };
   }, []);
 
@@ -128,7 +114,7 @@ export default function Welcome() {
             <div className="flex items-center gap-2 mb-3">
               <Chip variant="blue" icon={<Sparkles size={10} />}>OPERATIONS · LIVE</Chip>
               <Chip variant={healthy ? 'emerald' : 'rose'} icon={<CircleDot size={10} />}>
-                {healthy ? 'All systems nominal' : healthy === false ? 'API offline' : 'Probing…'}
+                {healthy ? 'Models ready' : healthy === false ? 'Models failed to load' : 'Loading models…'}
               </Chip>
             </div>
             <h1 className="font-syne font-bold text-3xl lg:text-4xl text-white leading-tight">
@@ -162,7 +148,7 @@ export default function Welcome() {
           label="Enrolled Faces"
           value={faces.length}
           accent="#10B981"
-          hint="Stored in local SQLite"
+          hint="Stored in this browser"
         />
         <StatCard
           icon={Activity}
@@ -180,14 +166,10 @@ export default function Welcome() {
         />
         <StatCard
           icon={Zap}
-          label="API Latency"
-          value={latency !== null ? `${latency}ms` : '—'}
+          label="Inference backend"
+          value={engine.backend ?? '—'}
           accent="#F59E0B"
-          delta={
-            latency !== null
-              ? { value: latency < 100 ? 'fast' : 'normal', positive: latency < 200 }
-              : undefined
-          }
+          hint="TensorFlow.js, in your browser"
         />
       </div>
 
@@ -240,7 +222,7 @@ export default function Welcome() {
                 to="/live"
                 icon={Camera}
                 title="Open Live Feed"
-                blurb="Stream webcam to the recognition engine over WebSocket."
+                blurb="Match a reference face on your webcam. Nothing leaves the browser."
                 accent="from-violet-500/30 to-fuchsia-500/20"
               />
               <QuickCard
@@ -273,35 +255,29 @@ export default function Welcome() {
                 <h3 className="font-syne font-bold text-lg text-white">Model status</h3>
               </div>
               <Chip variant={healthy ? 'emerald' : 'rose'}>
-                {healthy ? 'ONLINE' : healthy === false ? 'OFFLINE' : '…'}
+                {healthy ? 'READY' : healthy === false ? 'FAILED' : '…'}
               </Chip>
             </div>
             <div className="flex flex-col gap-2.5">
               <ModelRow
                 icon={ScanFace}
-                name="face_recognition"
-                detail="dlib · ResNet · 128-D"
+                name="Face recognition"
+                detail="face-api.js · ResNet · 128-D"
                 online={healthy === true}
               />
               <ModelRow
                 icon={Brain}
-                name="DeepFace + MTCNN"
-                detail="7-class emotion classifier"
+                name="Emotion"
+                detail="face-api.js · 7-class expression net"
                 online={healthy === true}
               />
               <ModelRow
                 icon={Cpu}
-                name="OpenCV"
-                detail="Frame extraction · BGR"
+                name="Detection"
+                detail="SSD MobileNet (photos) · Tiny detector (video)"
                 online={healthy === true}
               />
             </div>
-            {latency !== null && (
-              <div className="mt-4 pt-4 border-t border-white/5 flex items-center justify-between text-xs">
-                <span className="font-mono text-slate-500">Round-trip</span>
-                <span className="font-mono text-emerald-300">{latency} ms</span>
-              </div>
-            )}
           </div>
 
           {/* Emotion distribution */}

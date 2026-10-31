@@ -2,7 +2,8 @@ import { useRef, useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Upload, Camera, X, Zap, Smile, Activity, Cpu, Eye } from 'lucide-react';
 import { useToast } from '../App';
-import { api } from '../lib/api';
+import { detectEmotion, errorMessage } from '../lib/api';
+import { useEngine } from '../lib/useEngine';
 import { EmotionResponse, EmotionFace } from '../types';
 import { EMOTION_EMOJI, EMOTION_COLOR } from '../lib/utils';
 import PageHeader from '../components/PageHeader';
@@ -25,6 +26,7 @@ interface HistoryItem {
 
 export default function EmotionDetect() {
   const { toast } = useToast();
+  useEngine();
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -110,15 +112,12 @@ export default function EmotionDetect() {
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     canvas.getContext('2d')!.drawImage(video, 0, 0);
-    canvas.toBlob(async (blob) => {
-      if (!blob) return;
+    {
       detectingRef.current = true;
       setLiveDetecting(true);
       try {
-        const fd = new FormData();
-        fd.append('image', new File([blob], 'live.jpg', { type: 'image/jpeg' }));
         const t = performance.now();
-        const { data } = await api.post<EmotionResponse>('/api/emotion/detect', fd);
+        const data = await detectEmotion(canvas);
         setLastLatency(Math.round(performance.now() - t));
         setSessionCount((c) => c + 1);
         if (!data.face_detected || !data.faces || data.faces.length === 0) {
@@ -142,7 +141,7 @@ export default function EmotionDetect() {
         detectingRef.current = false;
         setLiveDetecting(false);
       }
-    }, 'image/jpeg', 0.92);
+    }
   }
 
   async function startWebcam() {
@@ -179,10 +178,8 @@ export default function EmotionDetect() {
     if (!file) { toast('Upload an image first.', 'warning'); return; }
     setLoading(true);
     try {
-      const fd = new FormData();
-      fd.append('image', file);
       const t = performance.now();
-      const { data } = await api.post<EmotionResponse>('/api/emotion/detect', fd);
+      const data = await detectEmotion(file);
       setLastLatency(Math.round(performance.now() - t));
       setResult(data);
       recordActivity({
@@ -200,10 +197,10 @@ export default function EmotionDetect() {
         };
         setHistory((h) => [item, ...h].slice(0, 5));
       }
-      toast(`Dominant emotion: ${data.dominant_emotion}`, 'success');
+      if (data.face_detected) toast(`Dominant emotion: ${data.dominant_emotion}`, 'success');
+      else toast('No face detected in this image.', 'warning');
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Analysis failed.';
-      toast(msg, 'error');
+      toast(errorMessage(err, 'Analysis failed.'), 'error');
     } finally {
       setLoading(false);
     }
@@ -220,7 +217,7 @@ export default function EmotionDetect() {
         eyebrow="MODULE · 04"
         title="Emotion Detection"
         accent="#F59E0B, #FB923C"
-        subtitle="Live webcam emotion analysis or upload a photo — powered by DeepFace + MTCNN."
+        subtitle="Live webcam emotion analysis or upload a photo — runs entirely in your browser."
       />
 
       {/* Telemetry strip */}
@@ -374,7 +371,7 @@ export default function EmotionDetect() {
                     <Chip variant={result.face_detected ? 'emerald' : 'amber'}>
                       {result.face_detected ? 'Face detected' : 'No face'}
                     </Chip>
-                    <Chip>DeepFace · MTCNN</Chip>
+                    <Chip>face-api.js · in browser</Chip>
                     {result.faces?.length ? <Chip variant="blue">{result.faces.length} region(s)</Chip> : null}
                   </div>
                 </div>
