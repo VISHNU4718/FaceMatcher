@@ -1,6 +1,6 @@
 import { ReactNode, useCallback, useEffect, useState } from 'react';
 import Sidebar, { useSidebarCollapsed } from './Sidebar';
-import { checkHealth } from '../lib/api';
+import { useEngine } from '../lib/useEngine';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertTriangle, Bell, Command as CommandIcon } from 'lucide-react';
 import { useLocation, Link } from 'react-router-dom';
@@ -15,8 +15,8 @@ const CRUMB: Record<string, { eyebrow: string; title: string }> = {
 };
 
 export default function Layout({ children }: { children: ReactNode }) {
-  const [showBanner, setShowBanner] = useState(false);
-  const [retryIn, setRetryIn] = useState(3);
+  const engine = useEngine();
+  const showBanner = engine.status === 'loading' || engine.status === 'error';
   const location = useLocation();
   const [collapsed, setCollapsed] = useSidebarCollapsed();
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -32,32 +32,6 @@ export default function Layout({ children }: { children: ReactNode }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
-  useEffect(() => {
-    let retryTimer: ReturnType<typeof setTimeout>;
-    let countdownTimer: ReturnType<typeof setInterval>;
-
-    async function check() {
-      const ok = await checkHealth();
-      if (!ok) {
-        setShowBanner(true);
-        setRetryIn(3);
-        countdownTimer = setInterval(() => setRetryIn((n) => n - 1), 1000);
-        retryTimer = setTimeout(() => {
-          clearInterval(countdownTimer);
-          check();
-        }, 3000);
-      } else {
-        setShowBanner(false);
-      }
-    }
-
-    check();
-    return () => {
-      clearTimeout(retryTimer);
-      clearInterval(countdownTimer);
-    };
   }, []);
 
   const ml = collapsed ? 72 : 240;
@@ -120,8 +94,15 @@ export default function Layout({ children }: { children: ReactNode }) {
               <div className="bg-amber-500/10 border-b border-amber-500/20 px-6 py-2.5 flex items-center gap-2.5">
                 <AlertTriangle size={14} className="text-amber-400 shrink-0" />
                 <span className="text-xs text-amber-300 font-mono">
-                  API warming up… retrying in {Math.max(retryIn, 0)}s
+                  {engine.status === 'error'
+                    ? `Could not load the face models: ${engine.error ?? 'unknown error'}`
+                    : 'Loading face models (about 13 MB, cached after the first visit)…'}
                 </span>
+                {engine.status === 'error' && (
+                  <button onClick={engine.retry} className="ml-auto text-xs font-mono text-amber-200 underline">
+                    Retry
+                  </button>
+                )}
               </div>
             </motion.div>
           )}

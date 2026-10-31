@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Trash2, Search, UserCheck, Users, Database, X, Calendar } from 'lucide-react';
 import { useToast } from '../App';
-import { api, getStaticUrl } from '../lib/api';
+import { deleteFace, errorMessage, identifyFaces, listFaces, MAX_NAME_LENGTH, registerFace } from '../lib/api';
+import { useEngine } from '../lib/useEngine';
 import { Face, IdentifyResponse, IdentifyResult } from '../types';
 import ConfidenceRing from '../components/ConfidenceRing';
 import Skeleton from '../components/Skeleton';
@@ -19,6 +20,7 @@ const PAGE = {
 
 export default function FaceDatabase() {
   const { toast } = useToast();
+  useEngine();
   const [faces, setFaces] = useState<Face[]>([]);
   const [loadingFaces, setLoadingFaces] = useState(true);
   const [registerName, setRegisterName] = useState('');
@@ -40,8 +42,7 @@ export default function FaceDatabase() {
   async function loadFaces() {
     setLoadingFaces(true);
     try {
-      const { data } = await api.get<{ faces: Face[] }>('/api/faces/list');
-      setFaces(data.faces);
+      setFaces(await listFaces());
     } catch {
       toast('Failed to load face database.', 'error');
     } finally {
@@ -80,19 +81,15 @@ export default function FaceDatabase() {
     if (!registerFile) { toast('Upload an image.', 'warning'); return; }
     setRegistering(true);
     try {
-      const fd = new FormData();
-      fd.append('name', registerName.trim());
-      fd.append('image', registerFile);
-      await api.post('/api/faces/register', fd);
-      recordActivity({ kind: 'register', title: `Registered ${registerName.trim()}`, detail: 'Added to local SQLite gallery' });
+      await registerFace(registerName, registerFile);
+      recordActivity({ kind: 'register', title: `Registered ${registerName.trim()}`, detail: 'Saved in this browser' });
       toast(`"${registerName}" registered!`, 'success');
       setRegisterName('');
       setRegisterFile(null);
       setRegisterPreview(null);
       loadFaces();
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Registration failed.';
-      toast(msg, 'error');
+      toast(errorMessage(err, 'Registration failed.'), 'error');
     } finally {
       setRegistering(false);
     }
@@ -100,7 +97,7 @@ export default function FaceDatabase() {
 
   async function handleDelete(id: number, name: string) {
     try {
-      await api.delete(`/api/faces/${id}`);
+      await deleteFace(id);
       setFaces((p) => p.filter((f) => f.id !== id));
       recordActivity({ kind: 'delete', title: `Removed ${name}`, detail: 'Deleted from gallery' });
       toast(`"${name}" removed.`, 'success');
@@ -114,9 +111,7 @@ export default function FaceDatabase() {
     setIdentifying(true);
     setIdentifyResult(null);
     try {
-      const fd = new FormData();
-      fd.append('image', identifyFile);
-      const { data } = await api.post<IdentifyResponse>('/api/faces/identify', fd);
+      const data = await identifyFaces(identifyFile);
       setIdentifyResult(data);
       const named = data.results.filter((r) => r.name !== 'Unknown').length;
       recordActivity({
@@ -127,8 +122,7 @@ export default function FaceDatabase() {
       });
       toast(`${data.face_count} face(s) analysed.`, 'info');
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Identification failed.';
-      toast(msg, 'error');
+      toast(errorMessage(err, 'Identification failed.'), 'error');
     } finally {
       setIdentifying(false);
     }
@@ -173,7 +167,7 @@ export default function FaceDatabase() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <DBStat label="Enrolled" value={faces.length} accent="#10B981" />
         <DBStat label="Matching" value={filtered.length} accent="#3B82F6" />
-        <DBStat label="Storage" value="SQLite" accent="#8B5CF6" />
+        <DBStat label="Storage" value="This browser" accent="#8B5CF6" />
         <DBStat label="Engine" value="128-D" accent="#F59E0B" />
       </div>
 
@@ -232,7 +226,7 @@ export default function FaceDatabase() {
                   >
                     <div className="relative">
                       <img
-                        src={getStaticUrl(f.image_path)}
+                        src={f.image_path}
                         alt={f.name}
                         className="w-full aspect-[5/4] object-cover rounded-lg bg-navy-800 ring-1 ring-white/5"
                       />
@@ -296,7 +290,8 @@ export default function FaceDatabase() {
               ref={regFileRef} type="file" accept="image/*" className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0];
-                if (f) { setRegisterFile(f); }
+                if (f && f.size > 5 * 1024 * 1024) toast('Image too large (max 5 MB).', 'error');
+                else if (f) setRegisterFile(f);
                 e.target.value = '';
               }}
             />
@@ -305,6 +300,7 @@ export default function FaceDatabase() {
               type="text"
               className="input-dark"
               placeholder="Full name"
+              maxLength={MAX_NAME_LENGTH}
               value={registerName}
               onChange={(e) => setRegisterName(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleRegister()}
@@ -359,7 +355,8 @@ export default function FaceDatabase() {
               ref={idFileRef} type="file" accept="image/*" className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0];
-                if (f) { setIdentifyFile(f); setIdentifyResult(null); }
+                if (f && f.size > 5 * 1024 * 1024) toast('Image too large (max 5 MB).', 'error');
+                else if (f) { setIdentifyFile(f); setIdentifyResult(null); }
                 e.target.value = '';
               }}
             />
@@ -443,7 +440,7 @@ function FaceDrawer({ face, onClose, onDelete }: { face: Face; onClose: () => vo
         </div>
         <div className="p-5">
           <div className="relative rounded-xl overflow-hidden ring-1 ring-white/10">
-            <img src={getStaticUrl(face.image_path)} alt={face.name} className="w-full aspect-square object-cover" />
+            <img src={face.image_path} alt={face.name} className="w-full aspect-square object-cover" />
             <div className="absolute inset-0 ring-1 ring-blue-500/20 rounded-xl pointer-events-none" />
             <div className="absolute bottom-2 left-2 px-2 py-1 rounded-md bg-black/70 backdrop-blur text-[10px] font-mono text-emerald-300 border border-emerald-500/30">
               ID #{face.id}
@@ -453,7 +450,7 @@ function FaceDrawer({ face, onClose, onDelete }: { face: Face; onClose: () => vo
           <div className="mt-4 grid grid-cols-2 gap-2">
             <DrawerMeta label="Enrolled" value={new Date(face.created_at).toLocaleDateString()} />
             <DrawerMeta label="Image hash" value={face.image_path.split('/').pop()?.slice(0, 8) ?? '—'} />
-            <DrawerMeta label="Encoding" value="128-D dlib" />
+            <DrawerMeta label="Encoding" value="128-D face-api.js" />
             <DrawerMeta label="Status" value={<span className="text-emerald-300">Active</span>} />
           </div>
           <button
