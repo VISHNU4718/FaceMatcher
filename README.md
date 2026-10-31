@@ -2,7 +2,7 @@
 
 A face recognition web app that runs entirely in the browser. Nothing is uploaded: photos, video frames and webcam frames are processed on your device with [`@vladmandic/face-api`](https://github.com/vladmandic/face-api) (TensorFlow.js). Registered faces are kept in the browser's IndexedDB.
 
-**Live demo:** (see the repository description)
+**Live demo:** https://facematcher-mu.vercel.app
 
 ## Modules
 
@@ -43,7 +43,7 @@ The tests cover the pure matching code (distance, identification, emotion mappin
 
 ## Deployment
 
-The `frontend/` directory is a static Vite app (`frontend/vercel.json` rewrites all routes to `index.html`). Import the repository on Vercel with the root directory set to `frontend`.
+The app is a static Vite build. The root `vercel.json` installs and builds in `frontend/`, publishes `frontend/dist` and rewrites all routes to `index.html`. Import the repository on Vercel with the default root directory.
 
 ## History
 
