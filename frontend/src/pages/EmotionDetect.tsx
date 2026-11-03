@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Upload, Camera, X, Zap, Smile, Activity, Cpu, Eye } from 'lucide-react';
 import { useToast } from '../App';
 import { detectEmotion, errorMessage } from '../lib/api';
+import { fileProblem } from '../lib/validation';
 import { useEngine } from '../lib/useEngine';
 import { EmotionResponse, EmotionFace } from '../types';
 import { EMOTION_EMOJI, EMOTION_COLOR } from '../lib/utils';
@@ -92,7 +93,8 @@ export default function EmotionDetect() {
   function pickFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
-    if (f.size > 5 * 1024 * 1024) { toast('Image too large (max 5 MB).', 'error'); return; }
+    const problem = fileProblem(f, 'image');
+    if (problem) { toast(problem, 'error'); e.target.value = ''; return; }
     setFile(f);
     setResult(null);
     e.target.value = '';

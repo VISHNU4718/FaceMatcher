@@ -1,8 +1,9 @@
 import { useRef, useState, useEffect, DragEvent } from 'react';
-import { Upload, Image as ImageIcon, Film, X } from 'lucide-react';
+import { Image as ImageIcon, Film, X } from 'lucide-react';
 import clsx from 'clsx';
 import { useToast } from '../App';
 import { compressImage } from '../lib/api';
+import { fileProblem } from '../lib/validation';
 
 interface Props {
   accept: 'image' | 'video';
@@ -12,8 +13,6 @@ interface Props {
   previewUrl?: string | null;
 }
 
-const MAX_IMAGE = 5 * 1024 * 1024;
-const MAX_VIDEO = 100 * 1024 * 1024;
 
 export default function DropZone({ accept, file, onFile, label, previewUrl }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -23,8 +22,6 @@ export default function DropZone({ accept, file, onFile, label, previewUrl }: Pr
 
   const acceptAttr = accept === 'image' ? 'image/jpeg,image/png,image/webp,image/heic' : 'video/mp4,video/avi,video/quicktime';
   const Icon = accept === 'image' ? ImageIcon : Film;
-  const maxSize = accept === 'image' ? MAX_IMAGE : MAX_VIDEO;
-  const maxLabel = accept === 'image' ? '5 MB' : '100 MB';
 
   useEffect(() => {
     if (previewUrl) {
@@ -43,8 +40,9 @@ export default function DropZone({ accept, file, onFile, label, previewUrl }: Pr
     if (incoming.name.toLowerCase().endsWith('.heic')) {
       toast('HEIC files may not be supported in all browsers — convert to JPG if issues occur.', 'warning');
     }
-    if (incoming.size > maxSize) {
-      toast(`File too large. Max ${maxLabel} allowed.`, 'error');
+    const problem = fileProblem(incoming, accept);
+    if (problem) {
+      toast(problem, 'error');
       return;
     }
     if (accept === 'image') {
@@ -114,7 +112,7 @@ export default function DropZone({ accept, file, onFile, label, previewUrl }: Pr
                 Drop {accept === 'image' ? 'image' : 'video'} or{' '}
                 <span className="text-blue-400 underline">browse</span>
               </p>
-              <p className="text-xs text-slate-600 mt-1 font-mono">Max {maxLabel}</p>
+              <p className="text-xs text-slate-600 mt-1 font-mono">Max {accept === 'image' ? '5 MB' : '100 MB'}</p>
             </div>
           </>
         )}

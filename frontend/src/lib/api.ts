@@ -7,6 +7,15 @@ import type {
   VideoMatchResult,
 } from '../types';
 import { loadEngine } from './engine';
+import {
+  AppError,
+  MAX_NAME_LENGTH,
+  validateFrameSkip,
+  validateImageFile,
+  validateName,
+  validateThreshold,
+  validateVideoFile,
+} from './validation';
 import { addFace, getAllFaces, removeFace } from './gallery';
 import {
   ASSUMED_FPS,
@@ -23,7 +32,7 @@ import {
 
 /** Face detection, recognition and emotion analysis, all running in the browser. */
 
-export class AppError extends Error {}
+export { AppError };
 
 export function errorMessage(err: unknown, fallback: string): string {
   if (err instanceof AppError) return err.message;
@@ -31,7 +40,7 @@ export function errorMessage(err: unknown, fallback: string): string {
   return fallback;
 }
 
-export const MAX_NAME_LENGTH = 60;
+export { MAX_NAME_LENGTH };
 const MAX_STILL_SIDE = 1024;
 const MAX_VIDEO_SIDE = 640;
 const MIN_EMOTION_FACE = 40;
@@ -56,7 +65,7 @@ function drawScaled(source: CanvasImageSource, w: number, h: number, maxSide: nu
 }
 
 async function loadStill(file: Blob): Promise<Still> {
-  if (!file.type.startsWith('image/')) throw new AppError('That file is not an image.');
+  validateImageFile(file);
   let bitmap: ImageBitmap;
   try {
     bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
@@ -123,9 +132,7 @@ export async function deleteFace(id: number): Promise<void> {
 }
 
 export async function registerFace(name: string, file: Blob): Promise<Face> {
-  const trimmed = name.trim();
-  if (!trimmed) throw new AppError('Enter a name.');
-  if (trimmed.length > MAX_NAME_LENGTH) throw new AppError(`Names can be at most ${MAX_NAME_LENGTH} characters.`);
+  const trimmed = validateName(name);
   const faceapi = await loadEngine();
   const still = await loadStill(file);
   const found = await faceapi
@@ -252,7 +259,9 @@ function openVideo(file: File): Promise<{ video: HTMLVideoElement; release: () =
 
 export async function matchVideo(opts: VideoScanOptions): Promise<VideoMatchResponse> {
   const { reference, video: file, threshold, frameSkip, onProgress, signal } = opts;
-  if (!(threshold > 0 && threshold <= 1)) throw new AppError('Threshold must be between 0 and 1.');
+  validateThreshold(threshold);
+  validateFrameSkip(frameSkip);
+  validateVideoFile(file);
   const faceapi = await loadEngine();
 
   const refStill = await loadStill(reference);

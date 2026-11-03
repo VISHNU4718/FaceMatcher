@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Camera, CameraOff, Upload, Zap, Maximize2, Wifi, Gauge, Users, Target } from 'lucide-react';
 import { useToast } from '../App';
 import { errorMessage, LiveMatcher } from '../lib/api';
+import { fileProblem } from '../lib/validation';
 import { useEngine } from '../lib/useEngine';
 import { LiveMatchResponse, LiveFaceResult } from '../types';
 import { confidenceColor } from '../lib/utils';
@@ -62,7 +63,8 @@ export default function LiveMatch() {
   function pickRef(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
-    if (f.size > 5 * 1024 * 1024) { toast('Image too large (max 5 MB).', 'error'); return; }
+    const problem = fileProblem(f, 'image');
+    if (problem) { toast(problem, 'error'); e.target.value = ''; return; }
     setRefImg(f);
     e.target.value = '';
   }
@@ -195,7 +197,7 @@ export default function LiveMatch() {
     if (ctx && canvasRef.current) ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
   }
 
-  useEffect(() => () => stop(), []); // eslint-disable-line
+  useEffect(() => () => stop(), []);
 
   return (
     <motion.div {...PAGE} className="flex flex-col gap-6">
