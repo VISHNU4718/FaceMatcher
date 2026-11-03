@@ -25,7 +25,7 @@ A face recognition web app that runs entirely in the browser. Nothing is uploade
 
 - Accuracy is that of face-api's small models. It is a demo-grade recogniser, not dlib/DeepFace-grade, and it is not suitable for anything where a wrong match matters.
 - Browsers do not expose a video's frame rate, so "every N frames" assumes 30 fps. At most 240 frames are scanned per video. Longer videos are sampled more sparsely.
-- Video uploads are limited to 100 MB and images to 5 MB.
+- Video uploads are limited to 100 MB and images to 5 MB. Names are limited to 60 characters, frame skip to 1-300 and the match threshold to (0, 1].
 - The gallery and the activity log live in this browser only. Clearing site data removes them.
 - Speed depends on the device. Without WebGL the CPU backend is noticeably slower.
 
@@ -35,11 +35,15 @@ A face recognition web app that runs entirely in the browser. Nothing is uploade
 cd frontend
 npm ci
 npm run dev        # http://localhost:5173
-npm test           # unit tests for matching, gallery storage and activity log
+npm run lint       # ESLint
+npm run typecheck  # tsc --noEmit
+npm test           # 51 unit tests (vitest)
 npm run build      # type-check and production build
 ```
 
-The tests cover the pure matching code (distance, identification, emotion mapping, frame sampling), the IndexedDB gallery (with `fake-indexeddb`) and the activity log. The model-backed paths are checked by hand in a real browser.
+CI (`.github/workflows/ci.yml`) runs lint, type-check, tests and build on every push to `main` and every pull request.
+
+The tests cover the pure code: matching (distance, identification, emotion mapping, frame sampling), input validation (names, file type and size, threshold, frame skip), the IndexedDB gallery (with `fake-indexeddb`), the activity log and formatting helpers. The model-backed paths (detection, descriptors, video seeking, webcam) are not unit-tested; they need a real browser and were checked by hand.
 
 ## Deployment
 

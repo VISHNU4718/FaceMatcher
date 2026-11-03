@@ -5,7 +5,6 @@ import DropZone from '../components/DropZone';
 import ConfidenceRing from '../components/ConfidenceRing';
 import Skeleton from '../components/Skeleton';
 import PageHeader from '../components/PageHeader';
-import Chip from '../components/Chip';
 import EmptyState from '../components/EmptyState';
 import { recordActivity } from '../lib/activity';
 import { useToast } from '../App';
@@ -87,7 +86,7 @@ export default function VideoMatch() {
   function exportJSON() {
     if (!result) return;
     const blob = new Blob([JSON.stringify(
-      { ...result, matches: result.matches.map(({ frame_url: _frame, ...m }) => m) },
+      { ...result, matches: result.matches.map((m) => ({ ...m, frame_url: undefined })) },
       null,
       2,
     )], { type: 'application/json' });

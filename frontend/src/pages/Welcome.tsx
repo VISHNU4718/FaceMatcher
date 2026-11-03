@@ -87,13 +87,13 @@ export default function Welcome() {
     };
   }, []);
 
-  const counts = useMemo(() => getDailyCounts(14), [activity, tick]);
+  const counts = useMemo(() => getDailyCounts(14), [activity, tick]); // eslint-disable-line react-hooks/exhaustive-deps
   const totalEvents = activity.length;
   const eventsToday = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
     return activity.filter((a) => new Date(a.ts).toISOString().slice(0, 10) === today).length;
   }, [activity]);
-  const emoTotals = useMemo(() => emotionTotals(), [activity]);
+  const emoTotals = useMemo(() => emotionTotals(), [activity]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const matchEvents = activity.filter((a) => a.kind === 'video' || a.kind === 'identify');
   const totalMatches = matchEvents.reduce((s, a) => s + Number(a.meta?.matches ?? 0), 0);

@@ -12,7 +12,7 @@ import {
   Settings,
 } from 'lucide-react';
 import clsx from 'clsx';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useEngine } from '../lib/useEngine';
 import { motion, AnimatePresence } from 'framer-motion';
 

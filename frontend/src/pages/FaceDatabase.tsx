@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Trash2, Search, UserCheck, Users, Database, X, Calendar } from 'lucide-react';
 import { useToast } from '../App';
+import { fileProblem } from '../lib/validation';
 import { deleteFace, errorMessage, identifyFaces, listFaces, MAX_NAME_LENGTH, registerFace } from '../lib/api';
 import { useEngine } from '../lib/useEngine';
 import { Face, IdentifyResponse, IdentifyResult } from '../types';
@@ -50,11 +51,11 @@ export default function FaceDatabase() {
     }
   }
 
-  useEffect(() => { loadFaces(); }, []);
+  useEffect(() => { loadFaces(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (identifyResult && identifyPreview) drawAnnotations(identifyResult.results);
-  }, [identifyResult, identifyPreview]);
+  }, [identifyResult, identifyPreview]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!registerFile) {
@@ -290,7 +291,7 @@ export default function FaceDatabase() {
               ref={regFileRef} type="file" accept="image/*" className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0];
-                if (f && f.size > 5 * 1024 * 1024) toast('Image too large (max 5 MB).', 'error');
+                if (f && fileProblem(f, 'image')) toast(fileProblem(f, 'image')!, 'error');
                 else if (f) setRegisterFile(f);
                 e.target.value = '';
               }}
@@ -355,7 +356,7 @@ export default function FaceDatabase() {
               ref={idFileRef} type="file" accept="image/*" className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0];
-                if (f && f.size > 5 * 1024 * 1024) toast('Image too large (max 5 MB).', 'error');
+                if (f && fileProblem(f, 'image')) toast(fileProblem(f, 'image')!, 'error');
                 else if (f) { setIdentifyFile(f); setIdentifyResult(null); }
                 e.target.value = '';
               }}

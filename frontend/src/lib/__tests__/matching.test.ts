@@ -78,3 +78,25 @@ describe('sampleTimes', () => {
     expect(() => sampleTimes(10, 1.5)).toThrow();
   });
 });
+
+describe('identify edge cases', () => {
+  const gallery = [
+    { id: 1, name: 'Ada', descriptor: [0, 0] },
+    { id: 2, name: 'Grace', descriptor: [0.5, 0] },
+  ];
+  it('returns Unknown for an empty gallery', () => {
+    expect(identify([0, 0], [])).toEqual({ name: 'Unknown', confidence: 0, face_id: null });
+  });
+  it('picks the nearest face', () => {
+    expect(identify([0.45, 0], gallery)).toMatchObject({ name: 'Grace', face_id: 2 });
+  });
+  it('returns Unknown (with the confidence) when the best match is below the minimum', () => {
+    const r = identify([1.3, 0], gallery);
+    expect(r.name).toBe('Unknown');
+    expect(r.face_id).toBeNull();
+    expect(r.confidence).toBe(0.2);
+  });
+  it('respects a custom minimum confidence', () => {
+    expect(identify([0.3, 0], gallery, 0.9).name).toBe('Unknown');
+  });
+});
